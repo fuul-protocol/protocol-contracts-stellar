@@ -1,0 +1,18 @@
+name: fuul-core-archival
+services:
+  stellar:
+    image: ${FUUL_ARCHIVAL_IMAGE:?Run node tests/e2e/run.mjs archive}
+    ports:
+      - "127.0.0.1:${FUUL_E2E_PORT:-18010}:8000"
+    command: ["--local", "--protocol-version", "28", "--limits", "archive", "--enable", "core,horizon,rpc", "--core-log-level", "ERROR"]
+    volumes:
+      - ledger:/opt/stellar
+      - ./archive-limits.json:/opt/stellar-default/local/core/etc/config-settings/p28/archive.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /opt/stellar/core/.upgrade-config-initialized && curl --fail --silent http://localhost:8000/ >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+volumes:
+  ledger:

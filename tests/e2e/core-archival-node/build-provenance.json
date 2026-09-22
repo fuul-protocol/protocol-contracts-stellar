@@ -1,0 +1,27 @@
+{
+  "purpose": "TEST ONLY: physical archival of unchanged core contract Wasm on an isolated local chain",
+  "sourceRepository": "https://github.com/stellar/stellar-core.git",
+  "sourceTag": "v28.0.1",
+  "sourceCommit": "947aad8413c189d85504acf72207e85eeda9b021",
+  "baseImage": "stellar/quickstart@sha256:db4515ce17553e635af0866b1408e052beb22a9f2b0e9ed463f87dbcdbe3806a",
+  "patchSha256": "bc7df9e27a484b70afa09f9ef8e50e6e854db29cf36299f4a057d90671062c34",
+  "changedSourceFiles": [
+    "src/ledger/NetworkConfig.cpp"
+  ],
+  "rustVersion": "1.95.0",
+  "limitations": [
+    "Artificial TTL timing: this does not qualify public-network archival timing or resource capacity.",
+    "The node fixture must never be deployed outside the isolated local test harness."
+  ],
+  "buildSettings": {
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_DEBUG": "0",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    "CARGO_BUILD_JOBS": "1",
+    "makeJobs": 2,
+    "LDFLAGS": "-Wl,--no-keep-memory",
+    "fastdevDependencyUnification": false
+  },
+  "previousAttempt": "core-archival-custom-build-1: compiler LTO exceeded the Docker daemon memory limit; no test image produced",
+  "documentKind": "build specification"
+}

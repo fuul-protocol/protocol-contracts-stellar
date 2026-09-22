@@ -1,0 +1,16 @@
+diff --git a/src/ledger/NetworkConfig.cpp b/src/ledger/NetworkConfig.cpp
+index 4966eeb..85e2c51 100644
+--- a/src/ledger/NetworkConfig.cpp
++++ b/src/ledger/NetworkConfig.cpp
+@@ -1402,8 +1402,9 @@ SorobanNetworkConfig::isValidConfigSettingEntry(ConfigSettingEntry const& cfg,
+         break;
+     case ConfigSettingID::CONFIG_SETTING_STATE_ARCHIVAL:
+         valid =
+-            cfg.stateArchivalSettings().maxEntryTTL >=
+-                MinimumSorobanNetworkConfig::MAXIMUM_ENTRY_LIFETIME &&
++            // TEST ONLY: permit fast physical archival on an isolated local chain.
++            // Keep initial settings, the Soroban host, and contract Wasm unchanged.
++            cfg.stateArchivalSettings().maxEntryTTL >= 128 &&
+             cfg.stateArchivalSettings().minTemporaryTTL >=
+                 MinimumSorobanNetworkConfig::MINIMUM_TEMP_ENTRY_LIFETIME &&
+             cfg.stateArchivalSettings().minPersistentTTL >=

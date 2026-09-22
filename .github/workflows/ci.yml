@@ -1,0 +1,58 @@
+name: Contracts
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deployment-script:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: bash -n scripts/deploy.sh
+      - run: bash scripts/deploy.sh --help
+      - run: bash -n scripts/status.sh
+      - run: bash scripts/status.sh --help
+      - name: Offline deployment orchestration tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mainnet_deploy.py' -v
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: stellar/actions/rust-cache@9288e3ff7584a7ba6e4581aa271d2aedda33cbe4
+      - uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87
+        with:
+          version: 27.1.0
+      - run: rustup target add wasm32v1-none
+      - name: Build contracts and test fixtures
+        run: stellar contract build --locked
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --locked
+  e2e:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        protocol: [27, 28]
+    env:
+      FUUL_E2E_PROTOCOL: ${{ matrix.protocol }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: stellar/actions/rust-cache@9288e3ff7584a7ba6e4581aa271d2aedda33cbe4
+      - uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87
+        with:
+          version: 27.1.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.3.12
+      - run: bun install --cwd tests/e2e --frozen-lockfile
+      - run: bun run --cwd tests/e2e typecheck
+      - run: bun audit --cwd tests/e2e
+      - run: node tests/e2e/run.mjs

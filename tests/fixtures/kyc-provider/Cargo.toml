@@ -1,0 +1,15 @@
+[package]
+name = "fuul-e2e-kyc-fixture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Deliberately not a production cdylib or Stellar deployment artifact.
+# The E2E runner explicitly requests a Wasm cdylib for this test fixture only.
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }

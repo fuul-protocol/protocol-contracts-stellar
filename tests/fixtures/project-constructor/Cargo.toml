@@ -1,0 +1,14 @@
+[package]
+name = "fuul-project-constructor-fixture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Opt-in failure probe, never a production Project implementation.
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }

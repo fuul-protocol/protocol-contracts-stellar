@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!stellar-core/
+!stellar-core/**
+!test-only-ttl.patch
+!build-provenance.json

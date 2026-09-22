@@ -1,0 +1,20 @@
+[package]
+name = "fuul-upgrade-manager-fixture"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[package.metadata.stellar]
+cargo_inherit = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+test = false
+doctest = false
+
+[dependencies]
+fuul-core = { workspace = true, features = ["access-control"] }
+soroban-sdk = { workspace = true }
+stellar-access = { workspace = true }
+stellar-contract-utils = { workspace = true }

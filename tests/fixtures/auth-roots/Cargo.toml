@@ -1,0 +1,14 @@
+[package]
+name = "fuul-e2e-auth-roots-fixture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Opt-in guest authorization probe; not a production deployment artifact.
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }

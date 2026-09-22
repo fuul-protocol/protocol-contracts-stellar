@@ -1,0 +1,11 @@
+[package]
+name = "fuul-e2e-multi-token-fixture"
+edition.workspace = true
+version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }

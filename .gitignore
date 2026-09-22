@@ -1,0 +1,10 @@
+/target/
+**/test_snapshots/
+/.stellar/
+.env
+.env.*
+.DS_Store
+/.local/
+/.idea/
+**/node_modules/
+/scripts/tests/__pycache__/

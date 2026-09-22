@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = [
+    "contracts/fuul-factory",
+    "contracts/fuul-manager",
+    "contracts/fuul-project",
+    "contracts/fuul-core",
+    "tests/upgrade",
+    "tests/fixtures/auth-roots",
+    "tests/fixtures/constructor-gate",
+    "tests/fixtures/fungible-token",
+    "tests/fixtures/kyc-provider",
+    "tests/fixtures/multi-token",
+    "tests/fixtures/non-fungible-token",
+    "tests/fixtures/project-constructor",
+    "tests/fixtures/upgrade-factory",
+    "tests/fixtures/upgrade-manager",
+    "tests/fixtures/upgrade-project",
+]
+[workspace.package]
+edition = "2021"
+rust-version = "1.91"
+version = "0.1.0"
+publish = false
+
+[workspace.dependencies]
+fuul-core = { path = "contracts/fuul-core" }
+soroban-sdk = { version = "=26.1.1" }
+stellar-access = { version = "=0.7.2" }
+stellar-contract-utils = { version = "=0.7.2" }
+stellar-tokens = { version = "=0.7.2" }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

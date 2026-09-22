@@ -1,0 +1,19 @@
+name: fuul-manager-e2e
+services:
+  stellar:
+    image: stellar/quickstart@sha256:db4515ce17553e635af0866b1408e052beb22a9f2b0e9ed463f87dbcdbe3806a
+    ports:
+      - "127.0.0.1:${FUUL_E2E_PORT:-18010}:8000"
+    # Protocols 27 and 28 use this image's bundled p26 limit profile.
+    # These limits differ from the current public Testnet settings.
+    command: ["--local", "--protocol-version", "${FUUL_E2E_PROTOCOL:-27}", "--limits", "testnet", "--enable", "core,horizon,rpc", "--core-log-level", "ERROR"]
+    volumes:
+      - ledger:/opt/stellar
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /opt/stellar/core/.upgrade-config-initialized && curl --fail --silent http://localhost:8000/ >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+volumes:
+  ledger:

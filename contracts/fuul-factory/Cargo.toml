@@ -1,0 +1,23 @@
+[package]
+name = "fuul-factory"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[package.metadata.stellar]
+cargo_inherit = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+fuul-core = { workspace = true, features = ["access-control"] }
+soroban-sdk = { workspace = true }
+stellar-access = { workspace = true }
+
+[dev-dependencies]
+proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
+fuul-project = { path = "../fuul-project" }
+soroban-sdk = { workspace = true, features = ["testutils"] }

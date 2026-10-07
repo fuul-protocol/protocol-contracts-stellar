@@ -13,6 +13,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE, CURRENCY, MANAGER, FACTORY, PROJECT = ("C" + c * 55 for c in "NCMFP")
 HASHES = {name: c * 64 for name, c in (("project", "a"), ("manager", "b"), ("factory", "c"))}
+# Fake signed transaction hashes, one per write the deployer sends.
+TXS = {name: c * 64 for name, c in (("upload_project", "1"), ("upload_manager", "2"),
+                                    ("upload_factory", "3"), ("deploy_manager", "4"),
+                                    ("deploy_factory", "5"), ("create_project", "6"))}
 
 FAKE = r'''
 import json, os, pathlib, sys
@@ -26,6 +30,7 @@ with open(os.environ["FAKE_LOG"], "a") as log:
 def val(flag): return a[a.index(flag) + 1]
 def out(value): print(value); sys.exit(0)
 def fail(): print("fake failure: SECRET_SENTINEL", file=sys.stderr); sys.exit(9)
+def signed(c): print("Signing transaction: " + c * 64, file=sys.stderr)
 if os.environ.get("FAIL_COMMAND") == " ".join([tool] + a[:3]): fail()
 hashes = {"project": "a" * 64, "manager": "b" * 64, "factory": "c" * 64}
 ids = {"manager": "C" + "M" * 55, "factory": "C" + "F" * 55,
@@ -70,19 +75,28 @@ if a[:3] == ["contract", "info", "hash"]:
 if a[:2] == ["contract", "upload"]:
     assert "--optimize=false" in a
     name = pathlib.Path(val("--wasm")).stem.removeprefix("fuul_")
+    signed({"project": "1", "manager": "2", "factory": "3"}[name])
     out("oops" if mode == "malformed_hash" else
         "d" * 64 if mode == "upload_hash" else hashes[name])
 if a[:2] == ["contract", "deploy"]:
     assert "--" in a
     name = next(k for k, v in hashes.items() if v == val("--wasm-hash"))
+    signed({"manager": "4", "factory": "5"}[name])
     out("invalid" if mode == "address" else ids[name])
+if a[:3] == ["tx", "fetch", "fee"]:
+    if os.environ.get("NO_FEE"): fail()
+    if "--output" in a: out('{"proposed":{"fee":200},"charged":{"fee":150,"resource_fee":50}}')
+    out("Transaction Status: SUCCESS\nTransaction Ledger: " + str(100 + int(val("--hash")[0])))
 if a[:2] == ["contract", "invoke"]:
     method = a[a.index("--") + 1]
     if method == "create_fuul_project":
         assert "--send=yes" in a
+        signed("6")
         out(json.dumps(ids["project"]))
     assert "--send=no" in a
     if method == "factory": out(json.dumps(ids["manager"] if mode == "factory" else ids["factory"]))
+    if method == "project_wasm_hash":
+        out(json.dumps("d" * 64 if mode == "project_wasm_hash" else hashes["project"]))
     if method == "required_signers": out('"2"' if mode == "quorum" else '"1"')
     if method == "has_manager_role": out("false" if mode == "manager_role" else "true")
 fail()
@@ -126,8 +140,18 @@ class MainnetDeploymentTests(unittest.TestCase):
                            "--currency", CURRENCY,
                            "--currency-limit", "1000000000", *args, **env)
 
+    def deploy_without_project(self, *args, **env):
+        return self.invoke("deploy", "--skip-project",
+                           "--rpc-url", "https://client-rpc.invalid",
+                           "--currency", CURRENCY,
+                           "--currency-limit", "1000000000", *args, **env)
+
     def record(self):
         return self.root / ".keys/mainnet/deployment.env"
+
+    def deployment(self, contract):
+        path = self.root / "deployments/mainnet" / f"{contract}.json"
+        return json.loads(path.read_text()) if path.exists() else None
 
     def calls(self, *prefix, tool="stellar"):
         log = self.root / "commands.jsonl"
@@ -215,6 +239,62 @@ class MainnetDeploymentTests(unittest.TestCase):
         self.assertNotIn("export ADMIN_SECRET", result.stdout)
         self.assertEqual(keys_before, (self.root / ".keys/mainnet/keys.env").read_bytes())
         self.assertIn("complete", self.record().read_text())
+        self.assertIn("export MANAGER_TX=" + TXS["deploy_manager"], self.record().read_text())
+        manager = self.deployment("FuulManager")
+        self.assertEqual(manager["address"], MANAGER)
+        self.assertEqual(manager["deployer"], "G" + "A" * 55)
+        self.assertEqual(manager["networkPassphrase"], "Public Global Stellar Network ; September 2015")
+        self.assertEqual(manager["wasmHash"], HASHES["manager"])
+        self.assertEqual(manager["wasmUploadTransactionHash"], TXS["upload_manager"])
+        self.assertEqual(manager["transactionHash"], TXS["deploy_manager"])
+        self.assertEqual(manager["ledger"], 104)
+        self.assertEqual(manager["feeCharged"], "150")
+        self.assertRegex(manager["timestamp"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertEqual(manager["deploymentParameters"], {
+            "admin": "G" + "A" * 55, "pauser": "G" + "B" * 55, "unpauser": "G" + "C" * 55,
+            "initialRequiredSigners": 1, "claimSigners": ["G" + "D" * 55],
+            "acceptedCurrency": CURRENCY, "nativeAsset": NATIVE,
+            "initialKycValidator": None, "initialCurrencyLimit": "1000000000"})
+        factory = self.deployment("FuulFactory")
+        self.assertEqual(factory["address"], FACTORY)
+        self.assertEqual(factory["transactionHash"], TXS["deploy_factory"])
+        self.assertEqual(factory["projectWasmUploadTransactionHash"], TXS["upload_project"])
+        self.assertEqual(factory["deploymentParameters"], {
+            "admin": "G" + "E" * 55, "manager": MANAGER, "feeCollector": "G" + "F" * 55,
+            "projectWasmHash": HASHES["project"]})
+        project = self.deployment("FuulProject")
+        self.assertEqual(project["address"], PROJECT)
+        self.assertEqual(project["transactionHash"], TXS["create_project"])
+        self.assertEqual(project["deploymentParameters"], {
+            "factory": FACTORY, "projectAdmin": "G" + "G" * 55,
+            "projectInfoUri": "ipfs://client project", "kycRequired": False})
+        self.assertIn("deployments/mainnet/FuulProject.json", result.stdout)
+        records = self.root / "deployments/mainnet"
+        self.assertEqual(stat.S_IMODE(records.stat().st_mode), 0o755)
+        self.assertEqual(stat.S_IMODE((records / "FuulManager.json").stat().st_mode), 0o644)
+        self.assertFalse(list(records.glob(".*")))
+
+    def test_existing_deployment_records_are_refused_before_the_network(self):
+        self.assertEqual(self.prepare().returncode, 0)
+        existing = self.root / "deployments/mainnet/FuulFactory.json"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("{}")
+        result = self.deploy()
+        self.assert_failed(result)
+        self.assertIn("FuulFactory.json already exists", result.stderr)
+        self.assertFalse(self.calls("network", "add"))
+        self.assertFalse(self.record().exists())
+        self.assertEqual(existing.read_text(), "{}")
+
+    def test_failed_transaction_lookup_records_null_ledger_and_fee(self):
+        self.assertEqual(self.prepare().returncode, 0)
+        result = self.deploy(NO_FEE="1")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        manager = self.deployment("FuulManager")
+        self.assertEqual(manager["transactionHash"], TXS["deploy_manager"])
+        self.assertIsNone(manager["ledger"])
+        self.assertIsNone(manager["feeCharged"])
+        self.assertNotIn("SECRET_SENTINEL", result.stdout + result.stderr)
 
     def test_failed_write_keeps_partial_record_and_does_not_repeat(self):
         self.assertEqual(self.prepare().returncode, 0)
@@ -251,6 +331,10 @@ class MainnetDeploymentTests(unittest.TestCase):
                 self.assertFalse((self.root / ".keys").exists())
         self.assert_failed(self.prepare("--network", "testnet"))
         self.assertFalse(self.calls("keys", "generate"))
+        control = self.deploy("--project-uri", "ipfs://line\nbreak")
+        self.assert_failed(control)
+        self.assertIn("control characters", control.stderr)
+        self.assertFalse((self.root / ".keys").exists())
 
     def test_status_reads_local_mainnet_record_then_verifies_without_writes(self):
         self.assertEqual(self.prepare().returncode, 0)
@@ -322,6 +406,9 @@ class MainnetDeploymentTests(unittest.TestCase):
         self.assertEqual(json.loads(manager[manager.index("--claim_signers") + 1]), ["G" + "A" * 55])
         invoked = self.calls("contract", "invoke")[0]["args"]
         self.assertEqual(invoked[invoked.index("--project_info_uri") + 1], uri)
+        self.assertEqual(self.deployment("FuulProject")["deploymentParameters"]["projectInfoUri"], uri)
+        self.assertEqual(self.deployment("FuulManager")["deploymentParameters"]["claimSigners"],
+                         ["G" + "A" * 55])
         self.assertEqual(len(self.calls("ledger", "entry", "fetch", "account")), 1)
 
     def test_bad_results_and_readbacks_never_mark_deployment_complete(self):
@@ -356,6 +443,48 @@ class MainnetDeploymentTests(unittest.TestCase):
         self.assert_failed(blocked)
         self.assertTrue(self.record().is_symlink())
         self.assertFalse(self.calls("network", "add"))
+
+    def test_skip_project_deploys_and_verifies_manager_and_factory_only(self):
+        self.assertEqual(self.prepare().returncode, 0)
+        self.assert_failed(self.deploy_without_project("--project-uri", "ipfs://project"))
+        self.assertFalse(self.calls("network", "add"))
+        (self.root / "commands.jsonl").unlink()
+        result = self.deploy_without_project()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        checked = [entry["args"] for entry in self.calls("ledger", "entry", "fetch", "account")]
+        self.assertEqual(len(checked), 6)
+        self.assertFalse(any("fuul-7" in args for args in checked))
+        self.assertEqual(len(self.calls("contract", "upload")), 3)
+        self.assertEqual(len(self.calls("contract", "deploy")), 2)
+        self.assertEqual(len(self.calls("contract", "info", "hash")), 5)
+        invokes = [entry["args"] for entry in self.calls("contract", "invoke")]
+        self.assertEqual([args[args.index("--") + 1] for args in invokes],
+                         ["project_wasm_hash", "required_signers", "has_manager_role"])
+        self.assertTrue(all("--send=no" in args for args in invokes))
+        self.assertIn("PROJECT=(not created)", result.stdout)
+        self.assertIn("complete", self.record().read_text())
+        self.assertIn("export PROJECT=''", self.record().read_text())
+        self.assertIsNone(self.deployment("FuulProject"))
+        self.assertEqual(self.deployment("FuulFactory")["projectWasmUploadTransactionHash"],
+                         TXS["upload_project"])
+        self.assertNotIn("FuulProject.json", result.stdout)
+        (self.root / "commands.jsonl").unlink()
+        offline = self.invoke("status")
+        self.assertEqual(offline.returncode, 0, offline.stderr)
+        self.assertIn("PROJECT=(not created)", offline.stdout)
+        online = self.invoke("status", "--verify")
+        self.assertEqual(online.returncode, 0, online.stdout + online.stderr)
+        self.assertIn("Factory Project WASM hash verified", online.stdout)
+        self.assertEqual(len(self.calls("contract", "info", "hash")), 2)
+        self.assertFalse(any("factory" == entry["args"][-1] for entry in self.calls("contract", "invoke")))
+
+    def test_skip_project_keeps_shared_accounts_and_rejects_a_wrong_project_hash(self):
+        self.assertEqual(self.prepare("--key-count", "1").returncode, 0)
+        result = self.deploy_without_project(BAD_RESULT="project_wasm_hash")
+        self.assert_failed(result)
+        self.assertEqual(len(self.calls("ledger", "entry", "fetch", "account")), 1)
+        self.assertIn("in_progress", self.record().read_text())
+        self.assertNotIn("Deployment complete", result.stdout)
 
     def test_incomplete_status_refuses_network_verification(self):
         self.assertEqual(self.prepare().returncode, 0)

@@ -14,6 +14,7 @@ usage() {
   printf '%s\n' \
     'Usage: bash scripts/deploy.sh --prepare-keys [--key-count 1-20]' \
     '       bash scripts/deploy.sh --project-uri VALUE --rpc-url URL --currency ID --currency-limit VALUE' \
+    '       bash scripts/deploy.sh --skip-project --rpc-url URL --currency ID --currency-limit VALUE' \
     '' \
     'Mainnet only. Prepare keys offline, then fund their public addresses externally.' \
     'The deployment command builds, tests, deploys and verifies on Mainnet.' \
@@ -21,6 +22,7 @@ usage() {
     '' \
     '  --prepare-keys          Generate or reload Mainnet identities without contacting RPC' \
     '  --project-uri VALUE     Nonempty Project metadata URI (prompted on a terminal)' \
+    '  --skip-project          Deploy Manager and Factory only; create no Project' \
     '  --key-count VALUE       1–20 identities when preparing keys (default 7)' \
     '  --rpc-url VALUE         Mainnet Soroban RPC endpoint' \
     '  --currency VALUE        Verified additional asset contract ID' \
@@ -38,12 +40,13 @@ die() { printf '%s\n' "$1" >&2; exit 1; }
 diagnostics=/dev/null
 stellar() { command stellar "$@" 2>>"$diagnostics" || return $?; }
 
-network=mainnet prepare_keys=false project_uri= rpc_url= currency= currency_limit= key_count=7
+network=mainnet prepare_keys=false skip_project=false project_uri= rpc_url= currency= currency_limit= key_count=7
 for arg in "$@"; do
   if [ "$arg" = --help ]; then usage; exit 0; fi
 done
 while [ "$#" -gt 0 ]; do
   if [ "$1" = --prepare-keys ]; then prepare_keys=true; shift; continue; fi
+  if [ "$1" = --skip-project ]; then skip_project=true; shift; continue; fi
   [ "$#" -ge 2 ] || die 'Every option requires a value. See --help.'
   case $1 in
     --project-uri) project_uri=$2 ;;
@@ -66,8 +69,13 @@ prompt_missing() {
 }
 case $key_count in [1-9]|1[0-9]|20) ;; *) die '--key-count must be 1–20.' ;; esac
 if [ "$prepare_keys" = false ]; then
-  prompt_missing project_uri 'Project metadata URI'
-  [[ $project_uri =~ [^[:space:]] ]] || die 'Specify a nonempty --project-uri.'
+  if [ "$skip_project" = true ]; then
+    [ -z "$project_uri" ] || die 'Use either --project-uri or --skip-project.'
+  else
+    prompt_missing project_uri 'Project metadata URI'
+    [[ $project_uri =~ [^[:space:]] ]] || die 'Specify a nonempty --project-uri.'
+    [[ ! $project_uri =~ [[:cntrl:]] ]] || die '--project-uri must not contain control characters.'
+  fi
   prompt_missing rpc_url 'Mainnet RPC URL'
   prompt_missing currency 'Mainnet accepted currency contract'
   prompt_missing currency_limit 'Mainnet currency limit in base units'
@@ -108,6 +116,17 @@ done
 [ "$prepare_keys" = true ] || [ ! -e "$record" ] ||
   die 'deployment.env already exists. Reconcile it manually; no deployment was started.'
 [ -z "$(git ls-files -- .keys)" ] || die '.keys contains tracked files; remove them from Git first.'
+# Public per-contract records, committed like the EVM repository's deployments/.
+records_dir="$root/deployments/$network"
+for path in "$root/deployments" "$records_dir"; do
+  [ ! -L "$path" ] || die 'Refusing a symbolic link in the deployments directory.'
+done
+if [ "$prepare_keys" = false ]; then
+  for contract in FuulManager FuulFactory FuulProject; do
+    [ ! -e "$records_dir/$contract.json" ] ||
+      die "deployments/$network/$contract.json already exists. Move the previous records before a new deployment."
+  done
+fi
 if [ "$prepare_keys" = false ] && [ ! -f "$key_dir/keys.env" ]; then
   die 'Mainnet identities are missing. Run bash scripts/deploy.sh --prepare-keys first, fund their public addresses, then deploy.'
 fi
@@ -220,7 +239,20 @@ DEPLOYMENT_STEP=configure_network
 stellar network add fuul --rpc-url "$rpc_url" --network-passphrase "$passphrase" \
   --config-dir "$FUUL_KEYS_CONFIG" >/dev/null
 completed 'Network configured'
+# Without a Project, its administrator's account is needed only if another role shares it.
+unneeded_key=
+if [ "$skip_project" = true ]; then
+  unneeded_key=$PROJECT_ADMIN_KEY
+  for role in ADMIN PAUSER UNPAUSER SIGNER FACTORY_ADMIN COLLECTOR; do
+    alias_name="${role}_KEY"
+    [ "${!alias_name}" != "$unneeded_key" ] || unneeded_key=
+  done
+fi
 for ((i=1; i<=FUUL_KEY_COUNT; i++)); do
+  if [ "fuul-$i" = "$unneeded_key" ]; then
+    completed "Account fuul-$i not required without a Project"
+    continue
+  fi
   DEPLOYMENT_STEP="check_account_$i"
   stellar ledger entry fetch account --account "fuul-$i" "${net[@]}" >/dev/null ||
     die 'Mainnet accounts must already exist and be funded. Check their XLM and RPC access.'
@@ -253,6 +285,8 @@ completed "Accepted currency: $CURRENCY (initial limit: $INITIAL_CURRENCY_LIMIT)
 # Reserve progress only before the first on-chain write.
 (set -C; : > "$record") 2>/dev/null || die 'A deployment record already exists; refusing to replace it.'
 PROJECT_HASH= MANAGER_HASH= FACTORY_HASH= MANAGER= FACTORY= PROJECT=
+PROJECT_UPLOAD_TX= MANAGER_UPLOAD_TX= FACTORY_UPLOAD_TX= MANAGER_TX= FACTORY_TX= PROJECT_TX=
+MANAGER_TIME= FACTORY_TIME= PROJECT_TIME=
 save_record() {
   local name
   temporary=$(mktemp "$key_dir/.deployment.env.XXXXXX")
@@ -261,7 +295,8 @@ save_record() {
     for name in DEPLOYMENT_STATUS DEPLOYMENT_STEP FUUL_NETWORK FUUL_KEYS_CONFIG FUUL_KEY_COUNT \
       ADMIN PAUSER UNPAUSER SIGNER FACTORY_ADMIN COLLECTOR PROJECT_ADMIN \
       ADMIN_KEY PAUSER_KEY UNPAUSER_KEY SIGNER_KEY FACTORY_ADMIN_KEY COLLECTOR_KEY PROJECT_ADMIN_KEY \
-      NATIVE CURRENCY INITIAL_CURRENCY_LIMIT PROJECT_HASH MANAGER_HASH FACTORY_HASH MANAGER FACTORY PROJECT; do
+      NATIVE CURRENCY INITIAL_CURRENCY_LIMIT PROJECT_HASH MANAGER_HASH FACTORY_HASH MANAGER FACTORY PROJECT \
+      PROJECT_UPLOAD_TX MANAGER_UPLOAD_TX FACTORY_UPLOAD_TX MANAGER_TX FACTORY_TX PROJECT_TX; do
       printf 'export %s=%q\n' "$name" "${!name}"
     done
   } > "$temporary"
@@ -270,6 +305,16 @@ save_record() {
   temporary=
 }
 checkpoint() { DEPLOYMENT_STEP=$1; save_record; }
+# Stellar CLI reports each signed transaction hash on stderr, which goes to the private log.
+log_mark() { wc -l < "$diagnostics" | tr -d ' '; }
+signed_transaction() {
+  local line hash= pattern='Signing transaction: ([0-9a-f]{64})'
+  while IFS= read -r line; do
+    if [[ $line =~ $pattern ]]; then hash=${BASH_REMATCH[1]}; fi
+  done < <(tail -n +"$(($1 + 1))" "$diagnostics")
+  printf '%s' "$hash"
+}
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 checkpoint ready_to_upload
 printf '  Progress record: .keys/%s/deployment.env\n' "$network"
 
@@ -279,13 +324,16 @@ for name in project manager factory; do
   local_hash=$(stellar contract info hash --wasm "$WASM/fuul_$name.wasm" --config-dir "$FUUL_KEYS_CONFIG")
   hash "$local_hash"
   checkpoint "upload_$name"
+  mark=$(log_mark)
   uploaded=$(stellar contract upload --wasm "$WASM/fuul_$name.wasm" "${source_args[@]}" \
     --instruction-leeway 3000000 --optimize=false)
   hash "$uploaded"
+  # An upload of code already on the network sends no transaction, so its hash stays empty.
+  transaction=$(signed_transaction "$mark")
   case $name in
-    project) PROJECT_HASH=$uploaded; label=Project ;;
-    manager) MANAGER_HASH=$uploaded; label=Manager ;;
-    factory) FACTORY_HASH=$uploaded; label=Factory ;;
+    project) PROJECT_HASH=$uploaded PROJECT_UPLOAD_TX=$transaction; label=Project ;;
+    manager) MANAGER_HASH=$uploaded MANAGER_UPLOAD_TX=$transaction; label=Manager ;;
+    factory) FACTORY_HASH=$uploaded FACTORY_UPLOAD_TX=$transaction; label=Factory ;;
   esac
   checkpoint "uploaded_$name"
   [ "$uploaded" = "$local_hash" ] || die 'Uploaded WASM hash differs from the local build.'
@@ -293,44 +341,67 @@ for name in project manager factory; do
 done
 
 # 7. Instantiate Manager/Factory, then submit Project creation explicitly.
-progress 7 'Deploy Manager, Factory and Project'
+if [ "$skip_project" = true ]; then
+  progress 7 'Deploy Manager and Factory'
+else
+  progress 7 'Deploy Manager, Factory and Project'
+fi
 checkpoint deploy_manager
+mark=$(log_mark)
 MANAGER=$(stellar contract deploy --wasm-hash "$MANAGER_HASH" "${source_args[@]}" -- \
   --admin "$ADMIN" --pauser "$PAUSER" --unpauser "$UNPAUSER" \
   --initial_required_signers 1 --claim_signers "[\"$SIGNER\"]" \
   --accepted_currency "$CURRENCY" --native_asset "$NATIVE" \
   --initial_kyc_validator null --initial_currency_limit "$INITIAL_CURRENCY_LIMIT")
 address "$MANAGER"
+MANAGER_TX=$(signed_transaction "$mark") MANAGER_TIME=$(now)
 checkpoint manager_deployed
 completed "Manager deployed: $MANAGER"
 checkpoint deploy_factory
+mark=$(log_mark)
 FACTORY=$(stellar contract deploy --wasm-hash "$FACTORY_HASH" "${source_args[@]}" -- \
   --admin "$FACTORY_ADMIN" --manager "$MANAGER" --fee_collector "$COLLECTOR" \
   --project_wasm_hash "$PROJECT_HASH")
 address "$FACTORY"
+FACTORY_TX=$(signed_transaction "$mark") FACTORY_TIME=$(now)
 checkpoint factory_deployed
 completed "Factory deployed: $FACTORY"
-checkpoint create_project
-result=$(stellar contract invoke --id "$FACTORY" "${source_args[@]}" --send=yes -- \
-  create_fuul_project --project_admin "$PROJECT_ADMIN" --project_info_uri "$project_uri" --kyc_required false)
-PROJECT=$(scalar "$result")
-address "$PROJECT"
-checkpoint project_created
-completed "Project created: $PROJECT"
+if [ "$skip_project" = true ]; then
+  completed 'Project creation skipped'
+else
+  checkpoint create_project
+  mark=$(log_mark)
+  result=$(stellar contract invoke --id "$FACTORY" "${source_args[@]}" --send=yes -- \
+    create_fuul_project --project_admin "$PROJECT_ADMIN" --project_info_uri "$project_uri" --kyc_required false)
+  PROJECT=$(scalar "$result")
+  address "$PROJECT"
+  PROJECT_TX=$(signed_transaction "$mark") PROJECT_TIME=$(now)
+  checkpoint project_created
+  completed "Project created: $PROJECT"
+fi
 
 # 8. Simulate readbacks and verify all deployed code before declaring completion.
 progress 8 'Verify deployment'
 checkpoint verify
-result=$(stellar contract invoke --id "$PROJECT" "${source_args[@]}" --send=no -- factory)
-[ "$(scalar "$result")" = "$FACTORY" ] || die 'Project.factory does not match the deployed Factory.'
-completed 'Project Factory link verified'
+if [ "$skip_project" = true ]; then
+  # No Project exists to read back, so check the code the Factory will deploy.
+  result=$(stellar contract invoke --id "$FACTORY" "${source_args[@]}" --send=no -- project_wasm_hash)
+  [ "$(scalar "$result")" = "$PROJECT_HASH" ] || die 'Factory.project_wasm_hash does not match the uploaded Project WASM.'
+  completed 'Factory Project WASM hash verified'
+  deployed=(MANAGER FACTORY)
+else
+  result=$(stellar contract invoke --id "$PROJECT" "${source_args[@]}" --send=no -- factory)
+  [ "$(scalar "$result")" = "$FACTORY" ] || die 'Project.factory does not match the deployed Factory.'
+  completed 'Project Factory link verified'
+  deployed=(MANAGER FACTORY PROJECT)
+fi
 result=$(stellar contract invoke --id "$MANAGER" "${source_args[@]}" --send=no -- required_signers)
 [ "$(scalar "$result")" = 1 ] || die 'Manager signer quorum is not 1.'
 completed 'Manager signer quorum verified'
 result=$(stellar contract invoke --id "$FACTORY" "${source_args[@]}" --send=no -- has_manager_role --account "$MANAGER")
 [ "$result" = true ] || die 'Factory does not recognize the deployed Manager.'
 completed 'Factory Manager role verified'
-for name in MANAGER FACTORY PROJECT; do
+for name in "${deployed[@]}"; do
   expected="${name}_HASH"
   actual=$(stellar contract info hash --id "${!name}" "${net[@]}")
   hash "$actual"
@@ -339,9 +410,68 @@ done
 completed 'Deployed code hashes verified'
 DEPLOYMENT_STATUS=complete
 checkpoint verified
+
+# Write one public JSON record per contract, matching the EVM repository's layout.
+DEPLOYMENT_STEP=write_records
+json_string() {
+  local value=$1
+  if [ -z "$value" ]; then printf null; return; fi
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  printf '"%s"' "$value"
+}
+transaction_fields() {
+  # Ledger and charged fee are informational; a failed lookup records null.
+  local hash=$1 text= json= ledger= fee=
+  local ledger_pattern='Transaction Ledger: ([0-9]+)' fee_pattern='"charged":\{"fee":([0-9]+)'
+  if [ -n "$hash" ]; then
+    text=$(stellar tx fetch fee --hash "$hash" "${net[@]}") || text=
+    json=$(stellar tx fetch fee --hash "$hash" --output json "${net[@]}") || json=
+    if [[ $text =~ $ledger_pattern ]]; then ledger=${BASH_REMATCH[1]}; fi
+    if [[ $json =~ $fee_pattern ]]; then fee=${BASH_REMATCH[1]}; fi
+  fi
+  printf '  "transactionHash": %s,\n  "ledger": %s,\n  "feeCharged": %s,' \
+    "$(json_string "$hash")" "${ledger:-null}" "$(json_string "$fee")"
+}
+write_deployment() {
+  local contract=$1 address=$2 wasm_hash=$3 upload_tx=$4 parameters=$5 extra=$6 transaction=$7 timestamp=$8
+  (umask 022; mkdir -p "$records_dir")
+  temporary=$(mktemp "$records_dir/.$contract.json.XXXXXX")
+  {
+    printf '{\n  "contract": "%s",\n  "address": "%s",\n  "deployer": "%s",\n' "$contract" "$address" "$ADMIN"
+    printf '  "network": "%s",\n  "networkPassphrase": "%s",\n' "$network" "$passphrase"
+    printf '  "wasmHash": "%s",\n  "wasmUploadTransactionHash": %s,\n' "$wasm_hash" "$(json_string "$upload_tx")"
+    printf '  "deploymentParameters": {\n%s\n  },\n%s' "$parameters" "$extra"
+    printf '%s\n  "timestamp": "%s"\n}\n' "$(transaction_fields "$transaction")" "$timestamp"
+  } > "$temporary"
+  chmod 644 "$temporary"
+  mv -f "$temporary" "$records_dir/$contract.json"
+  temporary=
+}
+write_deployment FuulManager "$MANAGER" "$MANAGER_HASH" "$MANAGER_UPLOAD_TX" "$(printf '%s\n' \
+  "    \"admin\": \"$ADMIN\"," "    \"pauser\": \"$PAUSER\"," "    \"unpauser\": \"$UNPAUSER\"," \
+  '    "initialRequiredSigners": 1,' '    "claimSigners": [' "      \"$SIGNER\"" '    ],' \
+  "    \"acceptedCurrency\": \"$CURRENCY\"," "    \"nativeAsset\": \"$NATIVE\"," \
+  '    "initialKycValidator": null,' "    \"initialCurrencyLimit\": \"$INITIAL_CURRENCY_LIMIT\"")" \
+  '' "$MANAGER_TX" "$MANAGER_TIME"
+write_deployment FuulFactory "$FACTORY" "$FACTORY_HASH" "$FACTORY_UPLOAD_TX" "$(printf '%s\n' \
+  "    \"admin\": \"$FACTORY_ADMIN\"," "    \"manager\": \"$MANAGER\"," \
+  "    \"feeCollector\": \"$COLLECTOR\"," "    \"projectWasmHash\": \"$PROJECT_HASH\"")" \
+  "  \"projectWasmUploadTransactionHash\": $(json_string "$PROJECT_UPLOAD_TX"),"$'\n' "$FACTORY_TX" "$FACTORY_TIME"
+records=(FuulManager FuulFactory)
+if [ -n "$PROJECT" ]; then
+  write_deployment FuulProject "$PROJECT" "$PROJECT_HASH" "$PROJECT_UPLOAD_TX" "$(printf '%s\n' \
+    "    \"factory\": \"$FACTORY\"," "    \"projectAdmin\": \"$PROJECT_ADMIN\"," \
+    "    \"projectInfoUri\": $(json_string "$project_uri")," '    "kycRequired": false')" \
+    '' "$PROJECT_TX" "$PROJECT_TIME"
+  records+=(FuulProject)
+fi
 printf '\nDeployment complete.\nMANAGER=%s\nFACTORY=%s\nPROJECT=%s\nNATIVE=%s\nCURRENCY=%s\nPROJECT_HASH=%s\nMANAGER_HASH=%s\nFACTORY_HASH=%s\nRecord: %s\n' \
-  "$MANAGER" "$FACTORY" "$PROJECT" "$NATIVE" "$CURRENCY" "$PROJECT_HASH" "$MANAGER_HASH" "$FACTORY_HASH" "$record"
+  "$MANAGER" "$FACTORY" "${PROJECT:-(not created)}" "$NATIVE" "$CURRENCY" "$PROJECT_HASH" "$MANAGER_HASH" "$FACTORY_HASH" "$record"
 printf 'Private diagnostics: %s\n' "$diagnostics"
-printf '%s\n' 'Transaction receipts: not collected. Save transaction hashes separately.'
+printf 'Deployment records (commit these):\n'
+for contract in "${records[@]}"; do
+  printf '  deployments/%s/%s.json\n' "$network" "$contract"
+done
 printf '\nLoad these values in your shell (from the repository root):\nsource scripts/keys.sh %s\nsource .keys/%s/deployment.env\n' \
   "$network" "$network"

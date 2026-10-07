@@ -41,7 +41,7 @@ For [automatic Mainnet deployment](deploy.md#automatic-mainnet-deployment), prep
 bash scripts/deploy.sh --prepare-keys
 ```
 
-The client must fund the displayed Mainnet addresses before running the deployment command in [deploy.md](deploy.md). Afterward, `bash scripts/status.sh` shows the local record and `bash scripts/status.sh --verify` compares it with the configured Mainnet RPC. The guide also retains manual Testnet instructions and SDK examples.
+The client must fund the displayed Mainnet addresses before running the deployment command in [deploy.md](deploy.md). Pass `--skip-project` to deploy Manager and Factory without creating a Project. Afterward, `bash scripts/status.sh` shows the local record and `bash scripts/status.sh --verify` compares it with the configured Mainnet RPC. The guide also retains manual Testnet instructions and SDK examples.
 A Factory can create Projects that pay different assets; currency limits belong to Manager and apply across Projects.
 Project currency restrictions are an application policy, not a contract-level allowlist.
 

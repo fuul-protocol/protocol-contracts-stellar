@@ -53,6 +53,16 @@ bash scripts/deploy.sh --project-uri 'ipfs://your-project' \
   --currency-limit "$INITIAL_CURRENCY_LIMIT"
 ```
 
+To deploy Manager and Factory **without creating a Project**, replace `--project-uri` with `--skip-project`:
+
+```sh
+bash scripts/deploy.sh --skip-project \
+  --rpc-url "$RPC_URL" --currency "$CURRENCY" \
+  --currency-limit "$INITIAL_CURRENCY_LIMIT"
+```
+
+The Project WASM is still uploaded because the Factory stores its hash. The `PROJECT_ADMIN` account does not need to exist unless another role shares its key. Verification reads `Factory.project_wasm_hash` instead of a Project, and the record keeps `PROJECT` empty. Create Projects later with the command in [step 5](#5-create-a-project-and-verify-it).
+
 This command first checks that **all generated accounts exist**, then builds and tests the workspace. Only after those checks does it reserve a deployment record and send real Mainnet transactions: upload the three production WASM files, deploy Manager and Factory, and create one Project. It verifies their code hashes and relationships. The final summary shows contract IDs, hashes, the record and a private diagnostic log. It does not fund the Project or run the SDK demo. `NO_COLOR=1` disables progress colors. An external custody or hardware-signing process would need a different integration.
 
 | Saved item | Location | Use later |
@@ -60,6 +70,7 @@ This command first checks that **all generated accounts exist**, then builds and
 | Stellar CLI identities | `.keys/mainnet/stellar/` | Refer to `fuul-N` through `--config-dir .keys/mainnet/stellar` |
 | Private exports and role mappings | `.keys/mainnet/keys.env` | Reload with `source scripts/keys.sh mainnet` |
 | Deployment progress and public IDs | `.keys/mainnet/deployment.env` | Source after completion or inspect a stopped run before retrying |
+| Public per-contract records | `deployments/mainnet/FuulManager.json`, `FuulFactory.json` and `FuulProject.json` (when created) | Commit them, like the EVM repository's `deployments/` |
 | Private command diagnostics | `.keys/deploy-mainnet.log.<random>` | Diagnose a stopped run without sharing the unredacted file |
 
 ### 4. Check the result
@@ -74,11 +85,11 @@ bash scripts/status.sh
 bash scripts/status.sh --verify
 ```
 
-The local view shows the last completed step, role aliases and public addresses, currency, contract IDs and code hashes. A partial deployment stays marked `in_progress`. `--verify` only works after completion. It simulates read-only calls to check the Project's Factory, Manager quorum, Factory's Manager role and all three deployed code hashes. A failed check exits with an error. Neither command sends transactions. The local view does not load keys. Verification invokes Stellar CLI with its configured identity alias.
+The local view shows the last completed step, role aliases and public addresses, currency, contract IDs and code hashes. A partial deployment stays marked `in_progress`. `--verify` only works after completion. It simulates read-only calls to check the Project's Factory, Manager quorum, Factory's Manager role and all three deployed code hashes. For a `--skip-project` record, `PROJECT` shows `(not created)` and `--verify` checks the Factory's stored Project WASM hash plus the Manager and Factory code hashes. A failed check exits with an error. Neither command sends transactions. The local view does not load keys. Verification invokes Stellar CLI with its configured identity alias.
 
 If you run from another machine, the local record and CLI network configuration must be available there. This script does not copy private files or establish remote access.
 
-**Transaction receipts:** the upload and deploy CLI commands used here return a code hash or contract ID, not a transaction receipt. Do not use either as a transaction hash. When you have an actual transaction hash from your RPC provider or explorer, Stellar CLI 27.1.0 can fetch its result and events:
+**Deployment records:** after verification, the script writes one JSON file per contract under `deployments/mainnet/` with the address, deployer, network passphrase, WASM hash, constructor parameters, the upload and deploy transaction hashes, ledger, charged fee in stroops and a UTC timestamp. Transaction hashes come from the CLI's signing output. An upload of code that already exists on the network sends no transaction and records `null`. Ledger and fee come from `stellar tx fetch fee` and are `null` if that lookup fails. A new deployment refuses to start while any of these files exist; move the previous records first. To inspect a recorded transaction, Stellar CLI 27.1.0 can fetch its result and events:
 
 ```sh
 stellar tx fetch result --hash "$TX_HASH" --network fuul \
@@ -104,7 +115,7 @@ source scripts/keys.sh mainnet
 source .keys/mainnet/deployment.env
 ```
 
-The summary and record contain public deployment values, not secrets. Keep the surrounding `.keys` directory private as described in step 2. Unlike the EVM deployment scripts, this helper does **not** record transaction hashes, receipts, constructor arguments as separate verification files or events. The on-chain check above confirms current contract state, not every transaction's history.
+The summary and record contain public deployment values, not secrets. Keep the surrounding `.keys` directory private as described in step 2. The JSON files under `deployments/mainnet/` hold transaction hashes and constructor arguments, but not receipts or events. The on-chain check above confirms current contract state, not every transaction's history.
 
 Offline regression tests use isolated temporary Git repositories and fake Stellar/Cargo/Rust commands. No network or real credentials are used:
 

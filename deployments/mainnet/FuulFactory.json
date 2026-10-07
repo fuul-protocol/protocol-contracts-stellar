@@ -1,0 +1,20 @@
+{
+  "contract": "FuulFactory",
+  "address": "CCMG4LPUIWGRXTBZOPI4YLAVKVNMT3H7AGSI6H27WBIS4CRUHXIBBU55",
+  "deployer": "GCVSN2YH3OAWSLGYQS6LM4CHFTKAVXXRUCDBPKSMXYWVSRN5LPJHHUHY",
+  "network": "mainnet",
+  "networkPassphrase": "Public Global Stellar Network ; September 2015",
+  "wasmHash": "7fe118a8c1dbeb0767900d81360efa5e5e82f74fed124ac47db23f1d9e94284b",
+  "wasmUploadTransactionHash": "06687b29ff2dd08c7c80f7dcef5296bf84b35fad44247e689ddeb6e7fb9ac37c",
+  "deploymentParameters": {
+    "admin": "GCYLEIGKVD66BVXR2S5GO4UBA2GBEIII5SNZ3262WRTOPVM6KNLGQ6GR",
+    "manager": "CCIZYCTKZUOKE3L3EFVU33LIXHJGPN2XASATM7BMEEMAXBBTD46EKUPE",
+    "feeCollector": "GCE2GOLF7A6VK6RANNL2H2EHKZR2ZENHM47XR3QACCZXWU3G5JZSDI5J",
+    "projectWasmHash": "7a0f0c3c86ad58aa2513643801711af6c86bb4c94cf02195da799aa7b7eb8c38"
+  },
+  "projectWasmUploadTransactionHash": "86a6df6a3a995b26f74fc84315d56fd9c8d8cd1a0dbd6df16d102657f2eeaa78",
+  "transactionHash": "da0eda44e49ee29d205e3de2dfde539e0539afdc42b651d28653dcdb2451e4a5",
+  "ledger": 64786443,
+  "feeCharged": "2673944",
+  "timestamp": "2026-10-05T16:33:17Z"
+}

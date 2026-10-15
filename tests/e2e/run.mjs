@@ -38,6 +38,8 @@ function run(command, args) {
 let passed = false;
 try {
   run('stellar', ['contract', 'build', '--locked']);
+  // The KYC fixture is an rlib so it never ships as a deployable artifact; build its test-only Wasm here.
+  run('cargo', ['rustc', '--locked', '--release', '--target', 'wasm32v1-none', '-p', 'fuul-e2e-kyc-fixture', '--crate-type', 'cdylib']);
   run('docker', [...compose, 'up', '-d', '--wait', '--wait-timeout', '360', '--pull', suite === 'archive' ? 'never' : 'missing']);
   const paths = suite === 'core'
     ? ['support', 'fuul_factory', 'fuul_project', 'fuul_manager', 'fuul_upgrade']

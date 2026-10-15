@@ -50,3 +50,7 @@ Manager and Factory upgrades require their current administrator. Project upgrad
 Restore archived entries before use and retain transaction receipts.
 
 Independent review and Fuul's production configuration approval remain required before Mainnet deployment.
+
+## License
+
+[MIT](LICENSE)

@@ -22,6 +22,7 @@ edition = "2021"
 rust-version = "1.91"
 version = "0.1.0"
 publish = false
+license = "MIT"
 
 [workspace.dependencies]
 fuul-core = { path = "contracts/fuul-core" }
